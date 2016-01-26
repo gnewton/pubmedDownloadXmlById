@@ -21,7 +21,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/xml"
-	"fmt"
+	//"fmt"
 	"io"
 	"math/rand"
 	"net/http"
@@ -29,20 +29,17 @@ import (
 	//"strconv"
 	"strings"
 	"time"
-	//	"log"
+	"log"
+	"fmt"
 )
 
-const CHUNK_SIZE = 50000
-
-const NUM_IDS_PER_URL = 50
-
-//const NUM_IDS_PER_URL = 7
-const AFTER_HOURS_MULTIPLYER = 1
-
-var endPubmedArticleSet = "</PubmedArticleSet>"
-var startPubmedArticleSet = "<PubmedArticleSet>"
-var startXml = "<?xml version=\"1.0\"?>"
-var docType = "<!DOCTYPE PubmedArticleSet PUBLIC \"-//NLM//DTD PubMedArticle, 1st January 2014//EN\" \"http://www.ncbi.nlm.nih.gov/corehtml/query/DTD/pubmed_140101.dtd\">"
+var chunkSize = 50000
+var numIdsPerRequest = 50
+var afterHoursMultiplyer = 1.0
+const endPubmedArticleSet = "</PubmedArticleSet>"
+const startPubmedArticleSet = "<PubmedArticleSet>"
+const startXml = "<?xml version=\"1.0\"?>"
+const docType = "<!DOCTYPE PubmedArticleSet PUBLIC \"-//NLM//DTD PubMedArticle, 1st January 2014//EN\" \"http://www.ncbi.nlm.nih.gov/corehtml/query/DTD/pubmed_140101.dtd\">"
 
 var baseXmlFileName = "pubmed_xml_"
 
@@ -86,7 +83,14 @@ type DescriptorName struct {
 	MajorTopicYN   string `xml:"MajorTopicYN,attr"`
 }
 
+func init() {
+// const chunkSize = 50000
+// const NUM_IDS_PER_URL = 50
+// afterHoursMultiplyer = 1
+}
+
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	tr := &http.Transport{
 		ResponseHeaderTimeout: time.Second * 500,
@@ -118,7 +122,7 @@ func main() {
 
 	//w := bufio.NewWriter(file)
 
-	var pmids []string = make([]string, NUM_IDS_PER_URL*AFTER_HOURS_MULTIPLYER)
+	var pmids []string = make([]string, int(float64(numIdsPerRequest)*afterHoursMultiplyer))
 
 	allCount := 0
 	count := 0
@@ -133,7 +137,7 @@ func main() {
 			break
 		}
 		line = strings.TrimSpace(line)
-		//fmt.Println(line)
+		//log.Println(line)
 		pmids[count] = line
 
 		if wXml == nil {
@@ -154,7 +158,7 @@ func main() {
 		allCount += 1
 		chunkCount += 1
 		// Start new xml file: close old one: open new one
-		if chunkCount > CHUNK_SIZE {
+		if chunkCount > chunkSize {
 			fmt.Fprintln(wXml, endPubmedArticleSet)
 			wXml.Flush()
 			wXml.Close()
@@ -164,7 +168,7 @@ func main() {
 			first = true
 		}
 		if allCount%500 == 0 {
-			fmt.Println(allCount)
+			log.Println(allCount)
 		}
 	}
 	if count != 0 {
@@ -208,9 +212,9 @@ func getMesh(first bool, meshWriter io.Writer, xmlWriter *gzip.Writer, transport
 	preUrlTime := time.Now()
 	url := makeUrl(baseUrl, pmids)
 
-	fmt.Println(url)
-	//fmt.Println(url)
-	//fmt.Println("\n\n")
+	log.Println(url)
+	//log.Println(url)
+	//log.Println("\n\n")
 	client := &http.Client{Transport: transport}
 	req, err := http.NewRequest("GET", url, nil)
 	req.Close = true
@@ -218,14 +222,14 @@ func getMesh(first bool, meshWriter io.Writer, xmlWriter *gzip.Writer, transport
 
 	//resp, err := client.Get(url)
 	if err != nil {
-		fmt.Println("Error opening url:", url, "   error=", err)
+		log.Println("Error opening url:", url, "   error=", err)
 		return
 	}
 	defer resp.Body.Close()
-	//fmt.Println(err)
+	//log.Println(err)
 
-	//fmt.Println("\n\n")
-	//fmt.Println(resp.Body)
+	//log.Println("\n\n")
+	//log.Println(resp.Body)
 
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(resp.Body)
@@ -234,13 +238,13 @@ func getMesh(first bool, meshWriter io.Writer, xmlWriter *gzip.Writer, transport
 	v := ArticleSet{}
 	err = xml.Unmarshal([]byte(s), &v)
 
-	//fmt.Println(v);
+	//log.Println(v);
 	// This should be inside a go routine listening on a channel
 	for i := 0; i < len(v.ArticleList); i++ {
-		//fmt.Println(i)
+		//log.Println(i)
 		fmt.Fprint(meshWriter, v.ArticleList[i].MedlineCitation.PMID)
 		pubmedArticle := v.ArticleList[i]
-		//fmt.Println(pubmedArticle.MedlineCitation.Article.Abstract.AbstractText)
+		//log.Println(pubmedArticle.MedlineCitation.Article.Abstract.AbstractText)
 		for j := 0; j < len(pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading); j++ {
 			//fmt.Fprintln(meshWriter, " ", article.MedlineCitation.MeshHeadingList.MeshHeading[j].DescriptorName.DescriptorName)
 			fmt.Fprint(meshWriter, "|")
@@ -257,11 +261,11 @@ func getMesh(first bool, meshWriter io.Writer, xmlWriter *gzip.Writer, transport
 
 	xmlWriter.Write([]byte(s))
 	postUrlTime := time.Now()
-	fmt.Println("Total request time:", postUrlTime.Sub(preUrlTime))
+	log.Println("Total request time:", postUrlTime.Sub(preUrlTime))
 }
 
 func makeXmlWriter(fileCount int, startPmid string) (*gzip.Writer, *bufio.Writer, *os.File) {
-	//xmlFile, err := os.Create("./" + baseXmlFileName + strconv.Itoa(fileCount) + "_" + strconv.Itoa(fileCount+CHUNK_SIZE) + ".gz")
+	//xmlFile, err := os.Create("./" + baseXmlFileName + strconv.Itoa(fileCount) + "_" + strconv.Itoa(fileCount+chunkSize) + ".gz")
 	xmlFile, err := os.Create("./" + baseXmlFileName + startPmid + ".gz")
 	if err != nil {
 		return nil, nil, nil
@@ -278,9 +282,9 @@ func afterHours() bool {
 
 func findNumIdsPerUrl() int {
 	if afterHours() {
-		return NUM_IDS_PER_URL * AFTER_HOURS_MULTIPLYER
+		return int(float64(numIdsPerRequest) * afterHoursMultiplyer)
 	}
-	return NUM_IDS_PER_URL
+	return numIdsPerRequest
 }
 
 func checkTime() {
@@ -295,10 +299,10 @@ func checkTime() {
 	*/
 
 	duration := (time.Duration)(sleepSeconds)
-	fmt.Println("Start sleep")
+	log.Println("Start sleep")
 	t0 := time.Now()
 
 	time.Sleep(duration * time.Second)
 	t1 := time.Now()
-	fmt.Println("End sleep:", t1.Sub(t0))
+	log.Println("End sleep:", t1.Sub(t0))
 }
