@@ -28,64 +28,27 @@ import (
 	"os"
 	//"strconv"
 	"strings"
+	"flag"
 	"time"
 	"log"
 	"fmt"
 )
 
-var chunkSize = 50000
-var numIdsPerRequest = 50
-var afterHoursMultiplyer = 1.0
-const endPubmedArticleSet = "</PubmedArticleSet>"
-const startPubmedArticleSet = "<PubmedArticleSet>"
-const startXml = "<?xml version=\"1.0\"?>"
-const docType = "<!DOCTYPE PubmedArticleSet PUBLIC \"-//NLM//DTD PubMedArticle, 1st January 2014//EN\" \"http://www.ncbi.nlm.nih.gov/corehtml/query/DTD/pubmed_140101.dtd\">"
+var recordsPerFile = 50000
+var recordsPerHttpRequest = 50
+var recordsPerHttpRequestAfterHours = 150
+var readFromStdin = false
+var defaultIdFile = "ids.txt"
 
 var baseXmlFileName = "pubmed_xml_"
 
-type ArticleSet struct {
-	ArticleList []PubmedArticle `xml:"PubmedArticle"`
-}
-
-type PubmedArticle struct {
-	MedlineCitation MedlineCitation `xml:"MedlineCitation"`
-}
-
-type MedlineCitation struct {
-	PMID    string
-	Article Article
-	//Status string `xml:"Status,attr"`
-	//Owner string `xml:"owner,attr"`
-	MeshHeadingList MeshHeadingList
-}
-
-type Article struct {
-	Abstract Abstract `xml:"Abstract"`
-}
-type Abstract struct {
-	AbstractText AbstractText
-}
-
-type AbstractText struct {
-	AbstractText string `xml:",chardata"`
-}
-
-type MeshHeadingList struct {
-	MeshHeading []MeshHeading
-}
-
-type MeshHeading struct {
-	DescriptorName DescriptorName
-}
-
-type DescriptorName struct {
-	DescriptorName string `xml:",chardata"`
-	MajorTopicYN   string `xml:"MajorTopicYN,attr"`
-}
-
 func init() {
-// const chunkSize = 50000
-// const NUM_IDS_PER_URL = 50
+	flag.BoolVar(&readFromStdin, "c", readFromStdin, "Read pmids from stdin, one per line")
+	flag.IntVar(&recordsPerFile, "n", recordsPerFile, "Number of records per output file")
+	flag.IntVar(&recordsPerHttpRequest, "t", recordsPerHttpRequest, "Number of records per http request to pubmed")
+	flag.IntVar(&recordsPerHttpRequestAfterHours, "T", recordsPerHttpRequestAfterHours, "Number of records per http request to pubmed, after hours")
+// const recordsPerFile = 50000
+// const NUM_IDS_PER_URL = 50w
 // afterHoursMultiplyer = 1
 }
 
@@ -122,7 +85,7 @@ func main() {
 
 	//w := bufio.NewWriter(file)
 
-	var pmids []string = make([]string, int(float64(numIdsPerRequest)*afterHoursMultiplyer))
+	var pmids []string = make([]string, recordsPerHttpRequest)
 
 	allCount := 0
 	count := 0
@@ -158,7 +121,7 @@ func main() {
 		allCount += 1
 		chunkCount += 1
 		// Start new xml file: close old one: open new one
-		if chunkCount > chunkSize {
+		if chunkCount > recordsPerFile {
 			fmt.Fprintln(wXml, endPubmedArticleSet)
 			wXml.Flush()
 			wXml.Close()
@@ -265,7 +228,7 @@ func getMesh(first bool, meshWriter io.Writer, xmlWriter *gzip.Writer, transport
 }
 
 func makeXmlWriter(fileCount int, startPmid string) (*gzip.Writer, *bufio.Writer, *os.File) {
-	//xmlFile, err := os.Create("./" + baseXmlFileName + strconv.Itoa(fileCount) + "_" + strconv.Itoa(fileCount+chunkSize) + ".gz")
+	//xmlFile, err := os.Create("./" + baseXmlFileName + strconv.Itoa(fileCount) + "_" + strconv.Itoa(fileCount+recordsPerFile) + ".gz")
 	xmlFile, err := os.Create("./" + baseXmlFileName + startPmid + ".gz")
 	if err != nil {
 		return nil, nil, nil
@@ -282,9 +245,9 @@ func afterHours() bool {
 
 func findNumIdsPerUrl() int {
 	if afterHours() {
-		return int(float64(numIdsPerRequest) * afterHoursMultiplyer)
+		return recordsPerHttpRequestAfterHours
 	}
-	return numIdsPerRequest
+	return recordsPerHttpRequest
 }
 
 func checkTime() {
