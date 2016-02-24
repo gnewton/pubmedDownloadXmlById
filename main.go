@@ -26,10 +26,11 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	//"strconv"
+	"strconv"
 	"strings"
 	"flag"
 	"time"
+	"errors"
 	"log"
 	"fmt"
 )
@@ -38,21 +39,33 @@ var recordsPerFile = 50000
 var recordsPerHttpRequest = 50
 var recordsPerHttpRequestAfterHours = 150
 var readFromStdin = false
+var writeMesh = false
 var defaultIdFile = "ids.txt"
 
 var baseXmlFileName = "pubmed_xml_"
+var meshFile = "pubmed.mesh.gz"
+var inputFileName = ""
 
 func init() {
+	flag.StringVar(&inputFileName, "f", inputFileName, "Name of input file with one pmid per line, if used")
+	flag.StringVar(&meshFile, "M", meshFile, "File to write pmids and mesh terms")
+
 	flag.BoolVar(&readFromStdin, "c", readFromStdin, "Read pmids from stdin, one per line")
 	flag.IntVar(&recordsPerFile, "n", recordsPerFile, "Number of records per output file")
 	flag.IntVar(&recordsPerHttpRequest, "t", recordsPerHttpRequest, "Number of records per http request to pubmed")
 	flag.IntVar(&recordsPerHttpRequestAfterHours, "T", recordsPerHttpRequestAfterHours, "Number of records per http request to pubmed, after hours")
-// const recordsPerFile = 50000
-// const NUM_IDS_PER_URL = 50w
-// afterHoursMultiplyer = 1
+
+	flag.Parse()
+	if inputFileName == "" && !readFromStdin{
+		log.Println("Either set -c for stdin or -f to read from a file")
+		flag.Usage()
+		os.Exit(1)
+	}
+
 }
 
 func main() {
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	tr := &http.Transport{
@@ -61,21 +74,11 @@ func main() {
 		DisableCompression:    false,
 	}
 
-	//fileCount := 0
-	/*
-		xmlFile, err := os.Create("./" + baseXmlFileName + strconv.Itoa(fileCount) + ".gz")
-		if err != nil {
-			return
-		}
-		defer xmlFile.Close()
-		ww := bufio.NewWriter(xmlFile)
-		//wXml := gzip.NewWriter(ww)
-	*/
 	var wXml *gzip.Writer = nil
 	var ww *bufio.Writer = nil
 	var xFile *os.File = nil
 
-	meshFile, err2 := os.Create("./pubmed.mesh.gz")
+	meshFile, err2 := os.Create(meshFile)
 	if err2 != nil {
 		return
 	}
@@ -89,7 +92,11 @@ func main() {
 
 	allCount := 0
 	count := 0
-	reader := bufio.NewReader(os.Stdin)
+	//reader := bufio.NewReader(os.Stdin)
+	reader, err := makeReader()
+	if err != nil{
+		log.Fatal(err)
+	}
 	first := true
 	chunkCount := 0
 	for {
@@ -100,6 +107,10 @@ func main() {
 			break
 		}
 		line = strings.TrimSpace(line)
+		err = lineChecker(line)
+		if err != nil{
+			log.Fatal(err)
+		}
 		//log.Println(line)
 		pmids[count] = line
 
@@ -110,7 +121,7 @@ func main() {
 		count = count + 1
 		// Collected enough pmids: get their XML from NIH
 		if count == numIdsPerUrl {
-			getMesh(first, wMesh, wXml, tr, pmids)
+			getPubmedRecords(first, wMesh, wXml, tr, pmids)
 			checkTime()
 			first = false
 			count = 0
@@ -135,7 +146,7 @@ func main() {
 		}
 	}
 	if count != 0 {
-		getMesh(first, wMesh, wXml, tr, pmids)
+		getPubmedRecords(first, wMesh, wXml, tr, pmids)
 	}
 	fmt.Fprintln(wXml, endPubmedArticleSet)
 
@@ -171,35 +182,28 @@ func makeUrl(baseUrl string, pmids []string) string {
 
 const baseUrl = "http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&rettype=xml&id="
 
-func getMesh(first bool, meshWriter io.Writer, xmlWriter *gzip.Writer, transport *http.Transport, pmids []string) {
+func getPubmedRecords(first bool, meshWriter io.Writer, xmlWriter *gzip.Writer, transport *http.Transport, pmids []string) {
 	preUrlTime := time.Now()
 	url := makeUrl(baseUrl, pmids)
 
 	log.Println(url)
-	//log.Println(url)
-	//log.Println("\n\n")
 	client := &http.Client{Transport: transport}
 	req, err := http.NewRequest("GET", url, nil)
 	req.Close = true
 	resp, err := client.Do(req)
 
-	//resp, err := client.Get(url)
 	if err != nil {
 		log.Println("Error opening url:", url, "   error=", err)
 		return
 	}
 	defer resp.Body.Close()
-	//log.Println(err)
-
-	//log.Println("\n\n")
-	//log.Println(resp.Body)
 
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(resp.Body)
 	s := buf.String()
 
 	v := ArticleSet{}
-	err = xml.Unmarshal([]byte(s), &v)
+	err = xml.Unmarshal(buf.Bytes(), &v)
 
 	//log.Println(v);
 	// This should be inside a go routine listening on a channel
@@ -268,4 +272,38 @@ func checkTime() {
 	time.Sleep(duration * time.Second)
 	t1 := time.Now()
 	log.Println("End sleep:", t1.Sub(t0))
+}
+
+func makeReader()(*bufio.Reader, error){
+	var inputFile *os.File
+	if readFromStdin{
+		log.Println("*************************************************")
+		inputFile = os.Stdin
+	}else{
+		if inputFileName == ""{
+			return nil, errors.New("Empty input file name")
+		}
+		var err error
+		inputFile, err = os.Open(inputFileName)
+		if err != nil{
+			return nil, err
+		}
+	}
+	reader := bufio.NewReader(inputFile)
+	return reader, nil
+}
+
+func lineChecker(l string)error{
+	if len(l) == 0{
+		return errors.New("Error: Empty line")
+	}
+	var n int
+	var err error
+	if n, err = strconv.Atoi(l); err != nil {
+		return errors.New("Error: Expecting pmid (integer); found[" + l + "]")
+	}
+	if n <=0{
+		return errors.New("Error: pmids are positive integers; found [" + l + "]")
+	}
+	return nil
 }
