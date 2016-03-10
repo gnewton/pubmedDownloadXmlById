@@ -18,21 +18,22 @@ NCBI: large jobs:
 
 import (
 	"bufio"
-	"bytes"
+	//"bytes"
 	"compress/gzip"
-	"encoding/xml"
+	//"encoding/xml"
 	//"fmt"
+	"errors"
+	"flag"
+	"fmt"
+	"github.com/gnewton/gopubmed"
 	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
-	"flag"
 	"time"
-	"errors"
-	"log"
-	"fmt"
 )
 
 var recordsPerFile = 50000
@@ -56,7 +57,7 @@ func init() {
 	flag.IntVar(&recordsPerHttpRequestAfterHours, "T", recordsPerHttpRequestAfterHours, "Number of records per http request to pubmed, after hours")
 
 	flag.Parse()
-	if inputFileName == "" && !readFromStdin{
+	if inputFileName == "" && !readFromStdin {
 		log.Println("Either set -c for stdin or -f to read from a file")
 		flag.Usage()
 		os.Exit(1)
@@ -90,11 +91,19 @@ func main() {
 
 	var pmids []string = make([]string, recordsPerHttpRequest)
 
+	urlFetcher := gopubmed.Fetcher{
+		Transport: &http.Transport{
+			ResponseHeaderTimeout: time.Second * 500,
+			DisableKeepAlives:     false,
+			DisableCompression:    false,
+		},
+	}
+
 	allCount := 0
 	count := 0
-	//reader := bufio.NewReader(os.Stdin)
+
 	reader, err := makeReader()
-	if err != nil{
+	if err != nil {
 		log.Fatal(err)
 	}
 	first := true
@@ -108,7 +117,7 @@ func main() {
 		}
 		line = strings.TrimSpace(line)
 		err = lineChecker(line)
-		if err != nil{
+		if err != nil {
 			log.Fatal(err)
 		}
 		//log.Println(line)
@@ -121,7 +130,7 @@ func main() {
 		count = count + 1
 		// Collected enough pmids: get their XML from NIH
 		if count == numIdsPerUrl {
-			getPubmedRecords(first, wMesh, wXml, tr, pmids)
+			getPubmedRecords(&urlFetcher, first, wMesh, wXml, tr, pmids)
 			checkTime()
 			first = false
 			count = 0
@@ -146,7 +155,7 @@ func main() {
 		}
 	}
 	if count != 0 {
-		getPubmedRecords(first, wMesh, wXml, tr, pmids)
+		getPubmedRecords(&urlFetcher, first, wMesh, wXml, tr, pmids)
 	}
 	fmt.Fprintln(wXml, endPubmedArticleSet)
 
@@ -166,58 +175,34 @@ func zeroArray(a []string) {
 	}
 }
 
-func makeUrl(baseUrl string, pmids []string) string {
-	url := baseUrl
-	for i := 0; i < len(pmids); i++ {
-		if pmids[i] != "" {
-			if i != 0 {
-				url += ","
-			}
-			url += pmids[i]
-		}
-	}
-	//return "http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&rettype=xml&id=15718680,15718682,119703,157186,1571868,11970375"
-	return url
-}
-
-const baseUrl = "http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&rettype=xml&id="
-
-func getPubmedRecords(first bool, meshWriter io.Writer, xmlWriter *gzip.Writer, transport *http.Transport, pmids []string) {
+func getPubmedRecords(urlFetcher *gopubmed.Fetcher, first bool, meshWriter io.Writer, xmlWriter *gzip.Writer, transport *http.Transport, pmids []string) {
 	preUrlTime := time.Now()
-	url := makeUrl(baseUrl, pmids)
 
-	log.Println(url)
-	client := &http.Client{Transport: transport}
-	req, err := http.NewRequest("GET", url, nil)
-	req.Close = true
-	resp, err := client.Do(req)
-
+	articles, raw, err := urlFetcher.GetArticlesAndRaw(pmids)
 	if err != nil {
-		log.Println("Error opening url:", url, "   error=", err)
-		return
+		log.Fatal(err)
 	}
-	defer resp.Body.Close()
+	s := string(raw[:len(raw)])
 
-	buf := new(bytes.Buffer)
-	buf.ReadFrom(resp.Body)
-	s := buf.String()
-
-	v := ArticleSet{}
-	err = xml.Unmarshal(buf.Bytes(), &v)
-
-	//log.Println(v);
-	// This should be inside a go routine listening on a channel
-	for i := 0; i < len(v.ArticleList); i++ {
-		//log.Println(i)
-		fmt.Fprint(meshWriter, v.ArticleList[i].MedlineCitation.PMID)
-		pubmedArticle := v.ArticleList[i]
-		//log.Println(pubmedArticle.MedlineCitation.Article.Abstract.AbstractText)
-		for j := 0; j < len(pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading); j++ {
-			//fmt.Fprintln(meshWriter, " ", article.MedlineCitation.MeshHeadingList.MeshHeading[j].DescriptorName.DescriptorName)
-			fmt.Fprint(meshWriter, "|")
-			fmt.Fprint(meshWriter, pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].DescriptorName.DescriptorName)
+	for i := 0; i < len(articles); i++ {
+		pubmedArticle := articles[i]
+		if pubmedArticle.MedlineCitation != nil && pubmedArticle.MedlineCitation.MeshHeadingList != nil && pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading != nil {
+			fmt.Fprint(meshWriter, articles[i].MedlineCitation.PMID.Text)
+			for j := 0; j < len(pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading); j++ {
+				fmt.Fprint(meshWriter, "|")
+				fmt.Fprint(meshWriter, pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].DescriptorName.Text)
+				if len(pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].QualifierName) > 0 {
+					fmt.Fprint(meshWriter, "=")
+					for q := 0; q < len(pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].QualifierName); q++ {
+						if q != 0 {
+							fmt.Fprint(meshWriter, "&")
+						}
+						fmt.Fprint(meshWriter, pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].QualifierName[q].Text)
+					}
+				}
+			}
+			fmt.Fprintln(meshWriter, "")
 		}
-		fmt.Fprintln(meshWriter, "")
 	}
 	if !first {
 		s = strings.Replace(s, startXml, "", -1)
@@ -274,18 +259,18 @@ func checkTime() {
 	log.Println("End sleep:", t1.Sub(t0))
 }
 
-func makeReader()(*bufio.Reader, error){
+func makeReader() (*bufio.Reader, error) {
 	var inputFile *os.File
-	if readFromStdin{
+	if readFromStdin {
 		log.Println("*************************************************")
 		inputFile = os.Stdin
-	}else{
-		if inputFileName == ""{
+	} else {
+		if inputFileName == "" {
 			return nil, errors.New("Empty input file name")
 		}
 		var err error
 		inputFile, err = os.Open(inputFileName)
-		if err != nil{
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -293,8 +278,8 @@ func makeReader()(*bufio.Reader, error){
 	return reader, nil
 }
 
-func lineChecker(l string)error{
-	if len(l) == 0{
+func lineChecker(l string) error {
+	if len(l) == 0 {
 		return errors.New("Error: Empty line")
 	}
 	var n int
@@ -302,7 +287,7 @@ func lineChecker(l string)error{
 	if n, err = strconv.Atoi(l); err != nil {
 		return errors.New("Error: Expecting pmid (integer); found[" + l + "]")
 	}
-	if n <=0{
+	if n <= 0 {
 		return errors.New("Error: pmids are positive integers; found [" + l + "]")
 	}
 	return nil
