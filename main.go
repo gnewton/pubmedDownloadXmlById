@@ -89,7 +89,8 @@ func main() {
 
 	//w := bufio.NewWriter(file)
 
-	var pmids []string = make([]string, recordsPerHttpRequest)
+	numIdsPerUrl := findNumIdsPerUrl()
+	pmids := make([]string, numIdsPerUrl)
 
 	urlFetcher := gopubmed.Fetcher{
 		Transport: &http.Transport{
@@ -109,7 +110,11 @@ func main() {
 	first := true
 	chunkCount := 0
 	for {
-		numIdsPerUrl := findNumIdsPerUrl()
+		thisNumIdsPerUrl := findNumIdsPerUrl()
+		if numIdsPerUrl != thisNumIdsPerUrl {
+			numIdsPerUrl = thisNumIdsPerUrl
+			pmids = make([]string, numIdsPerUrl)
+		}
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			// You may check here if err == io.EOF
