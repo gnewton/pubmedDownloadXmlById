@@ -22,11 +22,12 @@ import (
 	"compress/gzip"
 	//"encoding/xml"
 	//"fmt"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"github.com/gnewton/gopubmed"
-	"io"
+	//	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -37,8 +38,19 @@ import (
 )
 
 var recordsPerFile = 50000
+
+//////////
 var recordsPerHttpRequest = 50
 var recordsPerHttpRequestAfterHours = 150
+
+var timeMin float64 = 2.0
+var timeMax float64 = 8.0
+
+var timeMinAfterHours float64 = 0.0
+var timeMaxAfterHours float64 = 1.5
+
+////////
+
 var readFromStdin = false
 var writeMesh = false
 var defaultIdFile = "ids.txt"
@@ -48,6 +60,7 @@ var meshFile = "pubmed.mesh.gz"
 var inputFileName = ""
 
 func init() {
+	//gopubmed.Debug = true
 	flag.StringVar(&inputFileName, "f", inputFileName, "Name of input file with one pmid per line, if used")
 	flag.StringVar(&meshFile, "M", meshFile, "File to write pmids and mesh terms")
 
@@ -97,6 +110,7 @@ func main() {
 			ResponseHeaderTimeout: time.Second * 500,
 			DisableKeepAlives:     false,
 			DisableCompression:    false,
+			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 		},
 	}
 
@@ -169,8 +183,9 @@ func main() {
 	ww.Flush()
 
 	wMesh.Flush()
-	wMesh.Close()
 	wwMesh.Flush()
+	wMesh.Close()
+
 	xFile.Close()
 }
 
@@ -180,7 +195,7 @@ func zeroArray(a []string) {
 	}
 }
 
-func getPubmedRecords(urlFetcher *gopubmed.Fetcher, first bool, meshWriter io.Writer, xmlWriter *gzip.Writer, transport *http.Transport, pmids []string) {
+func getPubmedRecords(urlFetcher *gopubmed.Fetcher, first bool, meshWriter *gzip.Writer, xmlWriter *gzip.Writer, transport *http.Transport, pmids []string) {
 	preUrlTime := time.Now()
 
 	articles, raw, err := urlFetcher.GetArticlesAndRaw(pmids)
@@ -195,20 +210,25 @@ func getPubmedRecords(urlFetcher *gopubmed.Fetcher, first bool, meshWriter io.Wr
 			fmt.Fprint(meshWriter, articles[i].MedlineCitation.PMID.Text)
 			for j := 0; j < len(pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading); j++ {
 				fmt.Fprint(meshWriter, "|")
-				fmt.Fprint(meshWriter, pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].DescriptorName.Text)
+				fmt.Fprint(meshWriter, pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].DescriptorName.Attr_UI)
+				fmt.Fprint(meshWriter, "::"+pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].DescriptorName.Text)
+
 				if len(pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].QualifierName) > 0 {
 					fmt.Fprint(meshWriter, "=")
 					for q := 0; q < len(pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].QualifierName); q++ {
 						if q != 0 {
 							fmt.Fprint(meshWriter, "&")
 						}
-						fmt.Fprint(meshWriter, pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].QualifierName[q].Text)
+
+						fmt.Fprint(meshWriter, pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].QualifierName[q].Attr_UI)
+						fmt.Fprint(meshWriter, "::"+pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].QualifierName[q].Text)
 					}
 				}
 			}
 			fmt.Fprintln(meshWriter, "")
 		}
 	}
+	meshWriter.Flush()
 	if !first {
 		s = strings.Replace(s, startXml, "", -1)
 		s = strings.Replace(s, docType, "", -1)
@@ -231,12 +251,6 @@ func makeXmlWriter(fileCount int, startPmid string) (*gzip.Writer, *bufio.Writer
 	return gzip.NewWriter(ww), ww, xmlFile
 }
 
-func afterHours() bool {
-	now := time.Now()
-	hour, _, _ := now.Clock()
-	return hour < 8 || hour > 18
-}
-
 func findNumIdsPerUrl() int {
 	if afterHours() {
 		return recordsPerHttpRequestAfterHours
@@ -244,16 +258,27 @@ func findNumIdsPerUrl() int {
 	return recordsPerHttpRequest
 }
 
+func makeDelayTime() float64 {
+	if afterHours() {
+		log.Println("AFTER HOURS ...")
+		return timeMinAfterHours + rand.Float64()*timeMaxAfterHours
+	} else {
+		return timeMin + rand.Float64()*timeMax
+	}
+}
+
+func afterHours() bool {
+	now := time.Now()
+	hour, _, _ := now.Clock()
+	//return hour < 8 || hour > 18
+	// hours in UTC; need US East coast (location of NCBI)
+	return hour < 12 || hour > 22
+}
+
 func checkTime() {
 	now := time.Now()
 	rand.Seed(int64(now.Nanosecond()/9999999 + now.Second()*100 + now.Hour()))
-	sleepSeconds := 1 + rand.Intn(2)
-
-	/*
-		if !afterHours() {
-			sleepSeconds = 1 + rand.Intn(2)
-		}
-	*/
+	sleepSeconds := makeDelayTime()
 
 	duration := (time.Duration)(sleepSeconds)
 	log.Println("Start sleep")
