@@ -22,7 +22,7 @@ import (
 	"compress/gzip"
 	//"encoding/xml"
 	//"fmt"
-	"crypto/tls"
+//	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -46,7 +46,7 @@ var recordsPerHttpRequestAfterHours = 150
 var timeMin float64 = 2.0
 var timeMax float64 = 8.0
 
-var timeMinAfterHours float64 = 0.0
+var timeMinAfterHours float64 = 0.25
 var timeMaxAfterHours float64 = 1.5
 
 ////////
@@ -106,11 +106,12 @@ func main() {
 	pmids := make([]string, numIdsPerUrl)
 
 	urlFetcher := gopubmed.Fetcher{
+		Ssl: false,
 		Transport: &http.Transport{
 			ResponseHeaderTimeout: time.Second * 500,
 			DisableKeepAlives:     false,
 			DisableCompression:    false,
-			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+			//TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 		},
 	}
 
@@ -268,7 +269,7 @@ func makeDelayTime() float64 {
 }
 
 func afterHours() bool {
-	now := time.Now()
+	now := time.Now().UTC()
 	hour, _, _ := now.Clock()
 	//return hour < 8 || hour > 18
 	// hours in UTC; need US East coast (location of NCBI)
@@ -281,7 +282,6 @@ func checkTime() {
 	sleepSeconds := makeDelayTime()
 
 	duration := (time.Duration)(sleepSeconds)
-	log.Println("Start sleep")
 	t0 := time.Now()
 
 	time.Sleep(duration * time.Second)
