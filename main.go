@@ -20,9 +20,10 @@ import (
 	"bufio"
 	//"bytes"
 	"compress/gzip"
+	"crypto/tls"
 	//"encoding/xml"
 	//"fmt"
-//	"crypto/tls"
+	//	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -106,12 +107,12 @@ func main() {
 	pmids := make([]string, numIdsPerUrl)
 
 	urlFetcher := gopubmed.Fetcher{
-		Ssl: false,
+		Ssl: true,
 		Transport: &http.Transport{
 			ResponseHeaderTimeout: time.Second * 500,
 			DisableKeepAlives:     false,
 			DisableCompression:    false,
-			//TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 		},
 	}
 
@@ -231,9 +232,10 @@ func getPubmedRecords(urlFetcher *gopubmed.Fetcher, first bool, meshWriter *gzip
 	}
 	meshWriter.Flush()
 	if !first {
-		s = strings.Replace(s, startXml, "", -1)
-		s = strings.Replace(s, docType, "", -1)
-		s = strings.Replace(s, startPubmedArticleSet, "", -1)
+		s = removeFirstNLines(s, 3)
+		// s = strings.Replace(s, startXml, "", -1)
+		// s = strings.Replace(s, docType, "", -1)
+		// s = strings.Replace(s, startPubmedArticleSet, "", -1)
 	}
 	s = strings.Replace(s, endPubmedArticleSet, "<!-- breakset -->", -1)
 
@@ -321,4 +323,12 @@ func lineChecker(l string) error {
 		return errors.New("Error: pmids are positive integers; found [" + l + "]")
 	}
 	return nil
+}
+
+func removeFirstNLines(s string, n int) string {
+	for i := 0; i < 3; i++ {
+		n := strings.Index(s, "\n")
+		s = s[n+1:]
+	}
+	return s
 }
