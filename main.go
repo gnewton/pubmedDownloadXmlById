@@ -62,6 +62,7 @@ const baseXmlFileName = "pubmed_xml_"
 
 var meshFile = "pubmed.mesh.gz"
 var inputFileName = ""
+var verbose = false
 
 func init() {
 	//gopubmed.Debug = true
@@ -72,9 +73,10 @@ func init() {
 	flag.IntVar(&recordsPerFile, "n", recordsPerFile, "Number of records per output file")
 	flag.IntVar(&recordsPerHttpRequest, "t", recordsPerHttpRequest, "Number of records per http request to pubmed")
 	flag.IntVar(&recordsPerHttpRequestAfterHours, "T", recordsPerHttpRequestAfterHours, "Number of records per http request to pubmed, after hours")
+	flag.BoolVar(&verbose, "v", verbose, "verbose output")
 
 	flag.Parse()
-	if inputFileName == "" || !readFromStdin {
+	if inputFileName == "" && !readFromStdin {
 		fmt.Println("Either set -c for stdin or -f to read from a file\n")
 		flag.Usage()
 		os.Exit(1)
@@ -144,7 +146,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		//log.Println(line)
+		//mylog(line)
 		pmids[count] = line
 
 		if wXml == nil {
@@ -175,7 +177,7 @@ func main() {
 			first = true
 		}
 		if allCount%500 == 0 {
-			log.Println(allCount)
+			mylog("Count: " + strconv.Itoa(allCount))
 		}
 	}
 	if count != 0 {
@@ -208,11 +210,14 @@ func getPubmedRecords(urlFetcher *gopubmed.Fetcher, first bool, meshWriter *gzip
 		log.Fatal(err)
 	}
 	s := string(raw[:len(raw)])
+	mylog("Records returned: " + strconv.Itoa(len(articles)))
 
 	for i := 0; i < len(articles); i++ {
 		pubmedArticle := articles[i]
 		if pubmedArticle.MedlineCitation != nil && pubmedArticle.MedlineCitation.MeshHeadingList != nil && pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading != nil {
 			fmt.Fprint(meshWriter, articles[i].MedlineCitation.PMID.Text)
+
+			log.Println("foo")
 			for j := 0; j < len(pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading); j++ {
 				fmt.Fprint(meshWriter, "|")
 				fmt.Fprint(meshWriter, pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].DescriptorName.Attr_UI)
@@ -244,7 +249,7 @@ func getPubmedRecords(urlFetcher *gopubmed.Fetcher, first bool, meshWriter *gzip
 
 	xmlWriter.Write([]byte(s))
 	postUrlTime := time.Now()
-	log.Println("Total request time:", postUrlTime.Sub(preUrlTime))
+	mylog("Total request time:" + postUrlTime.Sub(preUrlTime).String())
 }
 
 func makeXmlWriter(fileCount int, startPmid string) (*gzip.Writer, *bufio.Writer, *os.File) {
@@ -266,7 +271,7 @@ func findNumIdsPerUrl() int {
 
 func makeDelayTime() float64 {
 	if afterHours() {
-		log.Println("AFTER HOURS ...")
+		mylog("  NCBI after hours")
 		return timeMinAfterHours + rand.Float64()*timeMaxAfterHours
 	} else {
 		return timeMin + rand.Float64()*timeMax
@@ -287,17 +292,14 @@ func checkTime() {
 	sleepSeconds := makeDelayTime()
 
 	duration := (time.Duration)(sleepSeconds)
-	t0 := time.Now()
 
 	time.Sleep(duration * time.Second)
-	t1 := time.Now()
-	log.Println("End sleep:", t1.Sub(t0))
 }
 
 func makeReader() (*bufio.Reader, error) {
 	var inputFile *os.File
 	if readFromStdin {
-		log.Println("*************************************************")
+		mylog("Reading from stdin")
 		inputFile = os.Stdin
 	} else {
 		if inputFileName == "" {
@@ -334,4 +336,10 @@ func removeFirstNLines(s string, n int) string {
 		s = s[n+1:]
 	}
 	return s
+}
+
+func mylog(m string) {
+	if verbose {
+		log.Println(m)
+	}
 }
