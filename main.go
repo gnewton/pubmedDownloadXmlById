@@ -104,12 +104,7 @@ func main() {
 		return
 	}
 
-	defer meshFile.Close()
-
-	wwMesh := bufio.NewWriter(meshFile)
-	wMesh := gzip.NewWriter(wwMesh)
-
-	//w := bufio.NewWriter(file)
+	gzBufferedMeshWriter := gzip.NewWriter(meshFile)
 
 	numIdsPerUrl := findNumIdsPerUrl()
 	pmids := make([]string, numIdsPerUrl)
@@ -159,7 +154,7 @@ func main() {
 		count = count + 1
 		// Collected enough pmids: get their XML from NIH
 		if count == numIdsPerUrl {
-			getPubmedRecords(&urlFetcher, first, wMesh, wXml, tr, pmids)
+			getPubmedRecords(&urlFetcher, first, gzBufferedMeshWriter, wXml, tr, pmids)
 			checkTime()
 			first = false
 			count = 0
@@ -184,7 +179,7 @@ func main() {
 		}
 	}
 	if count != 0 {
-		getPubmedRecords(&urlFetcher, first, wMesh, wXml, tr, pmids)
+		getPubmedRecords(&urlFetcher, first, gzBufferedMeshWriter, wXml, tr, pmids)
 	}
 	fmt.Fprintln(wXml, endPubmedArticleSet)
 
@@ -192,9 +187,8 @@ func main() {
 	wXml.Close()
 	ww.Flush()
 
-	wMesh.Flush()
-	wwMesh.Flush()
-	wMesh.Close()
+	gzBufferedMeshWriter.Flush()
+	gzBufferedMeshWriter.Close()
 
 	xFile.Close()
 }
@@ -241,7 +235,7 @@ func getPubmedRecords(urlFetcher *gopubmed.Fetcher, first bool, meshWriter *gzip
 			fmt.Fprintln(meshWriter, "")
 		}
 	}
-	meshWriter.Flush()
+
 	if !first {
 		s = removeFirstNLines(s, 3)
 		// s = strings.Replace(s, startXml, "", -1)
@@ -256,7 +250,6 @@ func getPubmedRecords(urlFetcher *gopubmed.Fetcher, first bool, meshWriter *gzip
 }
 
 func makeXmlWriter(fileCount int, startPmid string) (*gzip.Writer, *bufio.Writer, *os.File) {
-	//xmlFile, err := os.Create("./" + baseXmlFileName + strconv.Itoa(fileCount) + "_" + strconv.Itoa(fileCount+recordsPerFile) + ".gz")
 	xmlFileName := "./" + baseXmlFileName + startPmid + ".gz"
 	xmlFile, err := os.Create(xmlFileName)
 	if err != nil {
