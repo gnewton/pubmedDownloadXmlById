@@ -10,6 +10,8 @@ package main
     pubmed_xml_....n.gz
     XML downloaded, in 5000 record chunks
 
+Find largest PMID: MAX PMID: https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&reldate=60&datetype=pdat&retmax=1
+
 NCBI: large jobs:
 "In order not to overload the E-utility servers, NCBI recommends that users post no more than three URL requests per second and limit large jobs to either weekends or between 9:00 PM and 5:00 AM Eastern time during weekdays. "
   - https://www.ncbi.nlm.nih.gov/books/NBK25497/
@@ -56,7 +58,8 @@ var readFromStdin = false
 var writeMesh = false
 var defaultIdFile = "ids.txt"
 
-var baseXmlFileName = "pubmed_xml_"
+const baseXmlFileName = "pubmed_xml_"
+
 var meshFile = "pubmed.mesh.gz"
 var inputFileName = ""
 
@@ -71,12 +74,12 @@ func init() {
 	flag.IntVar(&recordsPerHttpRequestAfterHours, "T", recordsPerHttpRequestAfterHours, "Number of records per http request to pubmed, after hours")
 
 	flag.Parse()
-	if inputFileName == "" && !readFromStdin {
-		log.Println("Either set -c for stdin or -f to read from a file")
+	if inputFileName == "" || !readFromStdin {
+		fmt.Println("Either set -c for stdin or -f to read from a file\n")
 		flag.Usage()
 		os.Exit(1)
 	}
-
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 }
 
 func main() {
