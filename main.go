@@ -60,14 +60,14 @@ var defaultIdFile = "ids.txt"
 
 const baseXmlFileName = "pubmed_xml_"
 
-var meshFile = "pubmed.mesh.gz"
+var meshFileName = "pubmed.mesh.gz"
 var inputFileName = ""
 var verbose = false
 
 func init() {
 	//gopubmed.Debug = true
 	flag.StringVar(&inputFileName, "f", inputFileName, "Name of input file with one pmid per line, if used")
-	flag.StringVar(&meshFile, "M", meshFile, "File to write pmids and mesh terms")
+	flag.StringVar(&meshFileName, "M", meshFileName, "File to write pmids and mesh terms")
 
 	flag.BoolVar(&readFromStdin, "c", readFromStdin, "Read pmids from stdin, one per line")
 	flag.IntVar(&recordsPerFile, "n", recordsPerFile, "Number of records per output file")
@@ -98,11 +98,14 @@ func main() {
 	var ww *bufio.Writer = nil
 	var xFile *os.File = nil
 
-	meshFile, err2 := os.Create(meshFile)
+	mylog("Opening meshFile file: " + meshFileName)
+	meshFile, err2 := os.Create(meshFileName)
 	if err2 != nil {
 		return
 	}
+
 	defer meshFile.Close()
+
 	wwMesh := bufio.NewWriter(meshFile)
 	wMesh := gzip.NewWriter(wwMesh)
 
@@ -215,9 +218,9 @@ func getPubmedRecords(urlFetcher *gopubmed.Fetcher, first bool, meshWriter *gzip
 	for i := 0; i < len(articles); i++ {
 		pubmedArticle := articles[i]
 		if pubmedArticle.MedlineCitation != nil && pubmedArticle.MedlineCitation.MeshHeadingList != nil && pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading != nil {
+
 			fmt.Fprint(meshWriter, articles[i].MedlineCitation.PMID.Text)
 
-			log.Println("foo")
 			for j := 0; j < len(pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading); j++ {
 				fmt.Fprint(meshWriter, "|")
 				fmt.Fprint(meshWriter, pubmedArticle.MedlineCitation.MeshHeadingList.MeshHeading[j].DescriptorName.Attr_UI)
@@ -254,10 +257,12 @@ func getPubmedRecords(urlFetcher *gopubmed.Fetcher, first bool, meshWriter *gzip
 
 func makeXmlWriter(fileCount int, startPmid string) (*gzip.Writer, *bufio.Writer, *os.File) {
 	//xmlFile, err := os.Create("./" + baseXmlFileName + strconv.Itoa(fileCount) + "_" + strconv.Itoa(fileCount+recordsPerFile) + ".gz")
-	xmlFile, err := os.Create("./" + baseXmlFileName + startPmid + ".gz")
+	xmlFileName := "./" + baseXmlFileName + startPmid + ".gz"
+	xmlFile, err := os.Create(xmlFileName)
 	if err != nil {
 		return nil, nil, nil
 	}
+	mylog("Opening XML record file: " + xmlFileName)
 	ww := bufio.NewWriter(xmlFile)
 	return gzip.NewWriter(ww), ww, xmlFile
 }
